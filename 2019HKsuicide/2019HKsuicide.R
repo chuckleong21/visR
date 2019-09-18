@@ -72,4 +72,4 @@ ggplot(df_demographic, aes(axis1 = sex, axis2 = age, y = freq)) +
               text = element_text(family = "STXihei"), 
               panel.grid = element_blank(), 
               strip.text = element_text(size = 15))
-ggsave(here::here("suicide.png"), width = 36.9, height = 19.9, units = "cm")
+ggsave(here::here("alluvial"), width = 36.9, height = 19.9, units = "cm")
