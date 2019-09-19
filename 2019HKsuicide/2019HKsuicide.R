@@ -1,7 +1,7 @@
 library(tidyverse)
 library(lubridate)
 
-df_districts <- read_csv(here::here("2019HKsuicide", "Hong_Kong_18_Districts.csv"))
+df_districts <- readr::read_csv(here::here("2019HKsuicide", "Hong_Kong_18_Districts.csv"))
 
 df_hk <- fortify(rgdal::readOGR(here::here("2019HKsuicide", "Hong_Kong_18_Districts")))
 df_hk %<>% 
@@ -40,6 +40,7 @@ df_record %<>%
 # |                     demographic alluvial                        |
 # |=================================================================|
 library(ggalluvial)
+library(ggtext)
 df_demographic <- 
         select(df_record, date, sex, age, reason) %>% 
         filter(!reason == "不詳", age >= 18) %>% 
@@ -64,7 +65,7 @@ caption <- "**數據來源：2019香港自殺資料統計** | 設計：@chucc900
                 geom_text(stat = "stratum", label.strata = TRUE, family = "STXihei") + 
                 scale_fill_brewer(name = "主因", type = "qual", palette = "Set3") +
                 facet_wrap(~month, scales = "free_y", nrow = 3) + 
-                theme_minimal() + 
+                theme_minimal(base_family = "STXihei") + 
                 labs(x = "", y = "", 
                      title = "香港2019自殺個案情況", 
                      subtitle = subtitle, 
@@ -72,14 +73,15 @@ caption <- "**數據來源：2019香港自殺資料統計** | 設計：@chucc900
                 theme(plot.margin = margin(20, 10, 20, 10), 
                       plot.title = element_text(face = "bold", size = 24), 
                       plot.subtitle = element_text(size = 16), 
-                      plot.caption = ggtext::element_markdown(size = 12),
+                      plot.caption = element_markdown(size = 12),
                       text = element_text(family = "STXihei"), 
                       panel.grid = element_blank(), 
                       strip.text = element_text(size = 15)) -> alluvial
 )
-if(!file.exists(here::here("2019HKsuicide", "alluvial.png")))
+if(!file.exists(here::here("2019HKsuicide", "alluvial.png"))) {
         ggsave(here::here("2019HKsuicide", "alluvial.png"), alluvial, 
                width = 36.9, height = 19.9, units = "cm")
+}
 
 
 # ----2----
@@ -87,16 +89,21 @@ if(!file.exists(here::here("2019HKsuicide", "alluvial.png")))
 # |                     time                   |
 # |============================================|
 library(ggridges)
+
 df_time <- df_record %>% 
         filter(deceased == "Yes") %>% 
         select(date, week, day, age, hour)
 
-ridge <- df_time %>% 
-        group_by(month = month(date)) %>% 
-        count(date) %>% 
-        ungroup() %>% 
-        ggplot(aes(x = n, y = factor(month))) + 
-        geom_density_ridges(aes(fill = factor(month)), alpha = .6, show.legend = FALSE) 
+
+(
+        ridge <- 
+                df_time %>% 
+                group_by(month = month(date)) %>% 
+                count(date) %>% 
+                ungroup() %>% 
+                ggplot(aes(x = n, y = factor(month))) + 
+                geom_density_ridges(aes(fill = factor(month)), alpha = .6, show.legend = FALSE)
+)
 
 
 ridge_density_lines <- 
@@ -106,32 +113,71 @@ ridge_density_lines <-
         filter(density == max(density)) %>% 
         ungroup()
 
-ridge + geom_segment(data = ridge_density_lines, linetype = 2,
-                     aes(x = x, xend = x, y = ymin, yend = ymin + density * scale * iscale)) + 
-        scale_y_discrete(labels = month.abb[1:9]) + 
-        coord_flip() +
-        labs(x = "", y = "") +
-        theme_minimal() + 
-        theme(plot.margin = margin(t = 20), 
-              panel.grid = element_blank(), 
-              panel.grid.major.y = element_line(color = "grey 80", size = .18))
-
 df_month <- 
         df_time %>% 
         group_by(month = month(date, label = TRUE, abbr = TRUE)) %>% 
         count(date, name = "count") %>% 
         ungroup() %>% 
-        mutate(quarter = as_factor(case_when(month %in% month.abb[1:3] ~ "1st quarter",
-                                             month %in% month.abb[4:6] ~ "2nd quarter",
-                                             month %in% month.abb[7:9] ~ "3rd quarter")))
+        mutate(quarter = as_factor(case_when(month %in% month.abb[1:3] ~ "第一季度",
+                                             month %in% month.abb[4:6] ~ "第二季度",
+                                             month %in% month.abb[7:9] ~ "第三季度")))
 df_month$month <- droplevels(df_month$month)
 
-gplots::plotmeans(count ~ quarter, data = df_month, frame = FALSE, use.t = TRUE, p = .9)
-df_month_aov <- aov(count ~ quarter, data = df_month)
-summary(df_month_aov)
-df_month_aov %>% 
-        TukeyHSD() %>% 
-        pluck("quarter") %>% 
-        as.data.frame() %>% 
-        rownames_to_column(var = "pair")
+#                       oneway ANOVA test
+df_quarter_aov <- aov(count ~ quarter, data = df_month) 
+car::leveneTest(count ~ quarter, df_month) # cannot reject heteroskedasticity
+df_quarter_aov <- oneway.test(count ~ quarter, df_month) # use Welch t.test
+multcomp::glht(df_quarter_aov, linfct = multcomp::mcp(quarter = "Tukey"))
 
+df_aov <- data.frame(x = c(rep(7.45, 3), rep(7.65, 3), rep(9, 3), 
+                           8.3, 8.95, 8.95, 8.3, 
+                           9, 10.15, 10.15, 9.5),
+                     y = c(1:9 + .5, 
+                           2.5, 2.5, 5.5, 5.5, 
+                           5.8, 5.8, 8.5, 8.5), 
+                     group = c(rep(1:3, each = 3), rep(4, 4), rep(5, 4)))
+
+#       draw a summary table
+# tt <- ttheme_default(base_family = "STXihei")
+# df_mean_summary <- df_month %>%
+#         group_by(`月份` = month) %>%
+#         summarize(`月均自殺身亡個案` = round(mean(count), 2)) %>%
+#         tableGrob(rows = NULL, theme = tt)
+# grid.newpage()
+# grid.draw(df_mean_summary) 
+
+subtitle <- "下圖系單日自殺身亡案宗數的頻率分佈的峰巒圖。<br>圖形顯示頻率均值出現**右移**，
+自6月份起分佈出現了更多的**厚尾**——說明自殺身亡在同日發生的情況比以往更頻繁。
+<br>季度與季度相比，在95%的置信區間下, 季度均值有顯著性的不同。而進一步檢驗則發現，
+<br>**第二季度的均值都比第一季度和第三季度高**，第一季度和第三季度均值則無顯著差異。"
+
+ridge + 
+        geom_segment(data = ridge_density_lines, linetype = 2,
+                     aes(x = x, xend = x, 
+                         y = ymin, yend = ymin + density * scale * iscale)) +  
+        geom_path(data = df_aov, aes(x, y, group = group)) +
+        annotate("text", x = c(10, 10.8), y = c(4, 7.3), label = c("**", "*"), size = 8) + 
+        annotate("text", x = c(10, 10.8), y = c(3, 8.5), 
+                 label = c("mu[Q1]<=mu[Q2]", "mu[Q2]>=mu[Q3]"), 
+                 parse = TRUE, hjust = c(0, 1), size = 6) + 
+        # annotation_custom(df_mean_summary, xmin = -9, xmax = -4, ymin = 9, ymax = 11) + 
+        scale_x_reverse(breaks = seq(0, 10, 2), expand = c(0.1, 0)) + 
+        scale_y_discrete(labels = month.abb[1:nlevels(df_month$month)]) +
+        theme_minimal(base_family = "STXihei") + 
+        theme(plot.margin = margin(20, 10, 20, 10), 
+              plot.title = element_text(size = 24, face = "bold"),
+              plot.subtitle = element_markdown(size = 16),
+              plot.caption = element_markdown(size = 12),
+              panel.grid = element_blank(), 
+              panel.grid.major.y = element_line(color = "grey80", size = .18), 
+              axis.text = element_text(size = 10), 
+              axis.title.y = element_text(size = 12)) + 
+        coord_flip() + 
+        labs(x = "單日自殺身亡案宗數", y = "", 
+             title = "香港2019年自殺情況",
+             subtitle = subtitle, caption = caption)
+
+if(!file.exists(here::here("2019HKsuicide", "ridge.png"))) {
+        ggsave(here::here("2019HKsuicide", "ridge.png"), 
+               width = 36.9, height = 19.9, units = "cm")
+}
